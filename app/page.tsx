@@ -9,10 +9,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Globe, Wifi, Server, Radio, Plus, MoreHorizontal, Pencil, Copy, Settings, List, Layers } from "lucide-react"
+import { Globe, Wifi, Server, Radio, Plus, MoreHorizontal, Send, Pencil, Settings, List, Layers } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { SettingsModal } from "./settings-modal"
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
+import { SettingsModal } from './settings-modal'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle
+} from "@/components/ui/alert-dialog"
 
 type RequestType = "http" | "websocket" | "tcp" | "mqtt"
 
@@ -20,6 +22,12 @@ interface Request {
   id: string
   name: string
   type: RequestType
+  url: string
+  method?: string
+  body?: string
+  headers?: Record<string, string>
+  port?: number
+  topic?: string
 }
 
 interface HistoryItem {
@@ -41,7 +49,7 @@ function HistoryBox({ history, onResend, onCopy }: {
           {history.map((item, index) => (
             <li key={index} className="flex items-start space-x-2">
               {item.type === 'sent' ? (
-                <Radio className="h-4 w-4 mt-1 text-blue-500" />
+                <Send className="h-4 w-4 mt-1 text-blue-500" />
               ) : (
                 <Globe className="h-4 w-4 mt-1 text-green-500" />
               )}
@@ -60,7 +68,7 @@ function HistoryBox({ history, onResend, onCopy }: {
                   size="sm"
                   onClick={() => onResend(item.message)}
                 >
-                  <Radio className="h-4 w-4" />
+                  <Send className="h-4 w-4" />
                 </Button>
               ) : (
                 <Button
@@ -68,7 +76,7 @@ function HistoryBox({ history, onResend, onCopy }: {
                   size="sm"
                   onClick={() => onCopy(item.message)}
                 >
-                  <Copy className="h-4 w-4" />
+                  <Pencil className="h-4 w-4" />
                 </Button>
               )}
             </li>
@@ -81,10 +89,10 @@ function HistoryBox({ history, onResend, onCopy }: {
 
 export default function Interphase() {
   const [requests, setRequests] = useState<Request[]>([
-    { id: "1", name: "Get Users", type: "http" },
-    { id: "2", name: "Chat Socket", type: "websocket" },
-    { id: "3", name: "Server Ping", type: "tcp" },
-    { id: "4", name: "Temperature Updates", type: "mqtt" },
+    { id: "1", name: "Get Users", type: "http", url: "https://jsonplaceholder.typicode.com/users", method: "GET" },
+    { id: "2", name: "Chat Socket", type: "websocket", url: "wss://echo.websocket.org" },
+    { id: "3", name: "Server Ping", type: "tcp", url: "example.com", port: 80 },
+    { id: "4", name: "Temperature Updates", type: "mqtt", url: "mqtt://test.mosquitto.org:1883", topic: "temperature" },
   ])
   const [activeRequest, setActiveRequest] = useState<Request | null>(requests[0])
   const [response, setResponse] = useState("")
@@ -101,28 +109,143 @@ export default function Interphase() {
   const [warnOnDelete, setWarnOnDelete] = useState(true)
   const [deleteRequestId, setDeleteRequestId] = useState<string | null>(null)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (activeRequest?.type === "http") {
-      setResponse("Response will appear here after making a request.")
-    } else {
-      setIsConnected(!isConnected)
-      if (isConnected) {
-        setMessageHistory([])
+    if (!activeRequest) return
+
+    try {
+      const response = await fetch('/api/request', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...activeRequest,
+          action: isConnected ? 'disconnect' : 'connect'
+        }),
+      })
+      if (!response.ok) {
+        throw new Error('Network response was not ok')
       }
+      if (activeRequest.type === 'http') {
+        const data = await response.json()
+        setResponse(JSON.stringify(data, null, 2))
+      } else {
+        if (isConnected) {
+          // Handle disconnect
+          const data = await response.json()
+          toast({
+            title: "Disconnected",
+            description: data.message,
+          })
+          setIsConnected(false)
+          setMessageHistory([])
+        } else {
+          // Handle connect
+          setIsConnected(true)
+          const reader = response.body?.getReader()
+          if (reader) {
+            try {
+              while (true) {
+                const { done, value } = await reader.read()
+                if (done) break
+                const decodedValue = new TextDecoder().decode(value)
+                const messages = decodedValue.split('\n').filter(Boolean).map(
+                  message => {
+                    try {
+                      return JSON.parse(message)
+                    } catch (error) {
+                      console.error('Error parsing message:', error)
+                      return null
+                    }
+                  }
+                ).filter(Boolean)
+                messages.forEach((message: any) => {
+                  if (message.type === 'message') {
+                    setMessageHistory(prev => [
+                      { type: 'received', message: message.data, timestamp: new Date() },
+                      ...prev
+                    ])
+                  } else if (message.type === 'error') {
+                    toast({
+                      title: "Error",
+                      description: message.message,
+                      variant: "destructive",
+                    })
+                    setIsConnected(false)
+                  } else if (message.type === 'connection' && message.status === 'closed') {
+                    setIsConnected(false)
+                    toast({
+                      title: "Disconnected",
+                      description: "The connection was closed.",
+                    })
+                  }
+                })
+              }
+            } catch (error) {
+              console.error('Error reading stream:', error)
+              toast({
+                title: "Error",
+                description: "An error occurred while processing the response stream.",
+                variant: "destructive",
+              })
+              setIsConnected(false)
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error:', error)
+      toast({
+        title: "Error",
+        description: "An error occurred while processing your request.",
+        variant: "destructive",
+      })
     }
   }
 
-  const handleDisconnect = () => {
-    setIsConnected(false)
-    setMessageHistory([])
+  const handleDisconnect = async () => {
+    if (!activeRequest) return
+
+    try {
+      const response = await fetch('/api/request', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...activeRequest,
+          action: 'disconnect'
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Network response was not ok')
+      }
+
+      const data = await response.json()
+      toast({
+        title: "Disconnected",
+        description: data.message,
+      })
+      setIsConnected(false)
+      setMessageHistory([])
+    } catch (error) {
+      console.error('Error:', error)
+      toast({
+        title: "Error",
+        description: "An error occurred while disconnecting.",
+        variant: "destructive",
+      })
+    }
   }
 
   const handleNewRequest = () => {
     const newRequest: Request = {
       id: Date.now().toString(),
-      name: newRequestName,
+      name:  newRequestName,
       type: newRequestType,
+      url: "",
     }
     setRequests([...requests, newRequest])
     setActiveRequest(newRequest)
@@ -168,26 +291,79 @@ export default function Interphase() {
     setIsEditingTitle(false)
   }
 
-  const handleSendCustomMessage = () => {
-    if (customMessage && isConnected) {
+  const handleSendCustomMessage = async () => {
+    if (customMessage && isConnected && activeRequest) {
       let messageToSend = customMessage
-      if (isHexEncoded && (activeRequest?.type === "tcp" || activeRequest?.type === "mqtt")) {
+      if (isHexEncoded && (activeRequest.type === "tcp" || activeRequest.type === "mqtt")) {
         messageToSend = hexToBytes(customMessage)
       }
-      setMessageHistory([
+      setMessageHistory(prev => [
         { type: 'sent', message: messageToSend, timestamp: new Date() },
-        ...messageHistory
+        ...prev
       ])
       setCustomMessage("")
 
-      // Simulate receiving a response after 1 second
-      setTimeout(() => {
-        const responseMessage = `Response to: ${messageToSend}`
-        setMessageHistory(prev => [
-          { type: 'received', message: responseMessage, timestamp: new Date() },
-          ...prev
-        ])
-      }, 1000)
+      try {
+        const response = await fetch('/api/request', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            ...activeRequest,
+            body: messageToSend,
+          }),
+        })
+
+        if (!response.ok) {
+          throw new Error('Network response was not ok')
+        }
+
+        const reader = response.body?.getReader()
+        if (reader) {
+          try {
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              const decodedValue = new TextDecoder().decode(value)
+              const messages = decodedValue.split('\n').filter(Boolean).map(message => {
+                try {
+                  return JSON.parse(message)
+                } catch (error) {
+                  console.error('Error parsing message:', error)
+                  return null
+                }
+              }).filter(Boolean)
+              messages.forEach((message: any) => {
+                if (message.type === 'message') {
+                  setMessageHistory(prev => [
+                    { type: 'received', message: message.data, timestamp: new Date() },
+                    ...prev
+                  ])
+                } else if (message.type === 'error') {
+                  toast({
+                    title: "Error",
+                    description: message.message,
+                    variant: "destructive",
+                  })
+                  setIsConnected(false)
+                }
+              })
+            }
+          } catch (error) {
+            console.error('Error reading stream:', error)
+            throw new Error('An error occurred while processing the response stream.')
+          }
+        }
+      } catch (error) {
+        console.error('Error:', error)
+        toast({
+          title: "Error",
+          description: (error instanceof Error ? error.message : "An error occurred while sending your message."),
+          variant: "destructive",
+        })
+        setIsConnected(false)
+      }
     }
   }
 
@@ -239,8 +415,10 @@ export default function Interphase() {
             {requests.map((request) => (
               <li key={request.id} className="flex items-start justify-between">
                 <Button
-                  variant={activeRequest?.id === request.id ? "default" : "ghost"}
-                  className={`w-full justify-start text-left h-12 ${activeRequest?.id === request.id ? 'bg-primary text-primary-foreground' : ''}`}
+                  variant="ghost"
+                  className={`w-full justify-start text-left px-4 py-3 hover:bg-transparent ${
+                    activeRequest?.id === request.id ? 'bg-primary text-primary-foreground' : ''
+                  }`}
                   onClick={() => setActiveRequest(request)}
                 >
                   <div className="flex flex-col items-start">
@@ -359,21 +537,33 @@ export default function Interphase() {
               {activeRequest.type === "http" && (
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div className="flex space-x-4">
-                    <Select defaultValue="get">
+                    <Select
+                      value={activeRequest.method || "GET"}
+                      onValueChange={(value) => setActiveRequest({ ...activeRequest, method: value })}
+                    >
                       <SelectTrigger className="w-[180px]">
                         <SelectValue placeholder="HTTP Method" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="get">GET</SelectItem>
-                        <SelectItem value="post">POST</SelectItem>
-                        <SelectItem value="put">PUT</SelectItem>
-                        <SelectItem value="delete">DELETE</SelectItem>
+                        <SelectItem value="GET">GET</SelectItem>
+                        <SelectItem value="POST">POST</SelectItem>
+                        <SelectItem value="PUT">PUT</SelectItem>
+                        <SelectItem value="DELETE">DELETE</SelectItem>
                       </SelectContent>
                     </Select>
-                    <Input placeholder="Enter URL" className="flex-1" />
+                    <Input
+                      placeholder="Enter URL"
+                      className="flex-1"
+                      value={activeRequest.url}
+                      onChange={(e) => setActiveRequest({ ...activeRequest, url: e.target.value })}
+                    />
                     <Button type="submit">Send</Button>
                   </div>
-                  <Textarea placeholder="Request Body (for POST/PUT)" />
+                  <Textarea
+                    placeholder="Request Body (for POST/PUT)"
+                    value={activeRequest.body || ""}
+                    onChange={(e) => setActiveRequest({ ...activeRequest, body: e.target.value })}
+                  />
                 </form>
               )}
 
@@ -381,18 +571,40 @@ export default function Interphase() {
                 <div className="space-y-4">
                   <form onSubmit={handleSubmit} className="space-y-4">
                     {activeRequest.type === "websocket" && (
-                      <Input placeholder="WebSocket URL" />
+                      <Input
+                        placeholder="WebSocket URL"
+                        value={activeRequest.url}
+                        onChange={(e) => setActiveRequest({ ...activeRequest, url: e.target.value })}
+                      />
                     )}
                     {activeRequest.type === "tcp" && (
                       <div className="flex space-x-4">
-                        <Input placeholder="Host" className="flex-1" />
-                        <Input placeholder="Port" className="w-24" />
+                        <Input
+                          placeholder="Host"
+                          className="flex-1"
+                          value={activeRequest.url}
+                          onChange={(e) => setActiveRequest({ ...activeRequest, url: e.target.value })}
+                        />
+                        <Input
+                          placeholder="Port"
+                          className="w-24"
+                          value={activeRequest.port?.toString() || ""}
+                          onChange={(e) => setActiveRequest({ ...activeRequest, port: parseInt(e.target.value) })}
+                        />
                       </div>
                     )}
                     {activeRequest.type === "mqtt" && (
                       <>
-                        <Input placeholder="MQTT Broker URL" />
-                        <Input  placeholder="Topic" />
+                        <Input
+                          placeholder="MQTT Broker URL"
+                          value={activeRequest.url}
+                          onChange={(e) => setActiveRequest({ ...activeRequest, url: e.target.value })}
+                        />
+                        <Input
+                          placeholder="Topic"
+                          value={activeRequest.topic || ""}
+                          onChange={(e) => setActiveRequest({ ...activeRequest, topic: e.target.value })}
+                        />
                       </>
                     )}
                     <Button type="submit">{isConnected ? "Disconnect" : "Connect"}</Button>
