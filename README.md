@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Interphase
+
+A modern HTTP, WebSocket, TCP, and MQTT client built with Next.js. Interphase provides an intuitive interface for testing and debugging various network protocols.
+
+## Features
+
+- HTTP request testing (GET, POST, PUT, DELETE)
+- WebSocket connections with real-time messaging
+- TCP client functionality
+- MQTT publish/subscribe capabilities
+- Request history tracking
+- Support for multiple concurrent connections
+- Clean, modern UI built with Tailwind CSS
 
 ## Getting Started
 
-First, run the development server:
-
+1. Clone the repository:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/abbychau/interphase.git
+cd interphase
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Install dependencies:
+```bash
+npm install
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. Start the development server:
+```bash
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. Open [http://localhost:3000](http://localhost:3000) in your browser
 
-## Learn More
+## Development
 
-To learn more about Next.js, take a look at the following resources:
+This project uses:
+- [Next.js 14](https://nextjs.org) - React framework
+- [Tailwind CSS](https://tailwindcss.com) - Styling
+- [shadcn/ui](https://ui.shadcn.com) - UI components
+- [Radix UI](https://www.radix-ui.com) - Headless UI primitives
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Building for Production
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+To create an optimized production build:
 
-## Deploy on Vercel
+```bash
+npm run build
+npm run start
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## License
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+[MIT License](LICENSE)
